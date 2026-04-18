@@ -2860,6 +2860,19 @@ _FALLBACK_COMMENT = """
 #   cheap_model:
 #     provider: openrouter
 #     model: google/gemini-2.5-flash
+#   # Optional: extend the built-in complex-keyword list (e.g. for
+#   # non-English workflows — messages containing any of these words
+#   # stay on the primary model).
+#   # complex_keywords_extra:
+#   #   - błąd
+#   #   - analiza
+#   #   - napraw
+#   # Optional: fully override the built-in list (takes precedence
+#   # over complex_keywords_extra).
+#   # complex_keywords:
+#   #   - debug
+#   #   - error
+#   #   - implement
 """
 
 
@@ -2904,6 +2917,19 @@ _COMMENTED_SECTIONS = """
 #   cheap_model:
 #     provider: openrouter
 #     model: google/gemini-2.5-flash
+#   # Optional: extend the built-in complex-keyword list (e.g. for
+#   # non-English workflows — messages containing any of these words
+#   # stay on the primary model).
+#   # complex_keywords_extra:
+#   #   - błąd
+#   #   - analiza
+#   #   - napraw
+#   # Optional: fully override the built-in list (takes precedence
+#   # over complex_keywords_extra).
+#   # complex_keywords:
+#   #   - debug
+#   #   - error
+#   #   - implement
 """
 
 

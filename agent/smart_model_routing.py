@@ -59,11 +59,55 @@ def _coerce_int(value: Any, default: int) -> int:
         return default
 
 
+def _normalize_keyword_list(value: Any) -> set[str]:
+    """Coerce a config value into a lowercase-stripped set of keywords.
+
+    Accepts a list/tuple of strings; ignores other types and non-string
+    entries so malformed config degrades to the built-in behavior rather
+    than crashing the router.
+    """
+    if not isinstance(value, (list, tuple)):
+        return set()
+    out: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        word = item.strip().lower()
+        if word:
+            out.add(word)
+    return out
+
+
+def _resolve_complex_keywords(cfg: Dict[str, Any]) -> set[str]:
+    """Return the effective complex-keyword set for this routing config.
+
+    - ``complex_keywords`` (list[str]) fully replaces the built-in list.
+    - ``complex_keywords_extra`` (list[str]) extends the built-in list.
+    - When both are set, ``complex_keywords`` wins (full override) and
+      ``complex_keywords_extra`` is ignored — preserving the predictable
+      behavior a self-hoster who sets an explicit list would expect.
+    - Malformed values (non-list, non-string entries) are silently
+      ignored so a broken config falls back to the built-in list.
+    """
+    override = _normalize_keyword_list(cfg.get("complex_keywords"))
+    if override:
+        return override
+    extra = _normalize_keyword_list(cfg.get("complex_keywords_extra"))
+    return _COMPLEX_KEYWORDS | extra
+
+
 def choose_cheap_model_route(user_message: str, routing_config: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Return the configured cheap-model route when a message looks simple.
 
     Conservative by design: if the message has signs of code/tool/debugging/
     long-form work, keep the primary model.
+
+    Routing skips the cheap model when the message contains any keyword in
+    the effective complex-keyword set. The set defaults to a built-in
+    English list and can be extended or fully overridden via
+    ``complex_keywords_extra`` / ``complex_keywords`` in ``routing_config``
+    — useful for non-English workflows where the built-in list misses
+    domain-specific triggers.
     """
     cfg = routing_config or {}
     if not _coerce_bool(cfg.get("enabled"), False):
@@ -97,7 +141,7 @@ def choose_cheap_model_route(user_message: str, routing_config: Optional[Dict[st
 
     lowered = text.lower()
     words = {token.strip(".,:;!?()[]{}\"'`") for token in lowered.split()}
-    if words & _COMPLEX_KEYWORDS:
+    if words & _resolve_complex_keywords(cfg):
         return None
 
     route = dict(cheap_model)
