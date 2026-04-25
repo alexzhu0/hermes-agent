@@ -286,7 +286,7 @@ class EmailAdapter(BasePlatformAdapter):
             imap.logout()
             logger.info("[Email] IMAP connection test passed. %d existing messages skipped.", len(self._seen_uids))
         except Exception as e:
-            logger.error("[Email] IMAP connection failed: %s", e)
+            logger.error("[Email] IMAP connection failed: %s", e, exc_info=True)
             return False
 
         try:
@@ -297,7 +297,7 @@ class EmailAdapter(BasePlatformAdapter):
             smtp.quit()
             logger.info("[Email] SMTP connection test passed.")
         except Exception as e:
-            logger.error("[Email] SMTP connection failed: %s", e)
+            logger.error("[Email] SMTP connection failed: %s", e, exc_info=True)
             return False
 
         self._running = True
@@ -325,7 +325,7 @@ class EmailAdapter(BasePlatformAdapter):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error("[Email] Poll error: %s", e)
+                logger.error("[Email] Poll error: %s", e, exc_info=True)
             await asyncio.sleep(self._poll_interval)
 
     async def _check_inbox(self) -> None:
@@ -399,7 +399,7 @@ class EmailAdapter(BasePlatformAdapter):
                 except Exception:
                     pass
         except Exception as e:
-            logger.error("[Email] IMAP fetch error: %s", e)
+            logger.error("[Email] IMAP fetch error: %s", e, exc_info=True)
         return results
 
     async def _dispatch_message(self, msg_data: Dict[str, Any]) -> None:
@@ -477,7 +477,7 @@ class EmailAdapter(BasePlatformAdapter):
             )
             return SendResult(success=True, message_id=message_id)
         except Exception as e:
-            logger.error("[Email] Send failed to %s: %s", chat_id, e)
+            logger.error("[Email] Send failed to %s: %s", chat_id, e, exc_info=True)
             return SendResult(success=False, error=str(e))
 
     def _send_email(
@@ -560,7 +560,7 @@ class EmailAdapter(BasePlatformAdapter):
             )
             return SendResult(success=True, message_id=message_id)
         except Exception as e:
-            logger.error("[Email] Send document failed: %s", e)
+            logger.error("[Email] Send document failed: %s", e, exc_info=True)
             return SendResult(success=False, error=str(e))
 
     def _send_email_with_attachment(

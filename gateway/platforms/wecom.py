@@ -1257,7 +1257,7 @@ class WeComAdapter(BasePlatformAdapter):
         except FileNotFoundError as exc:
             return SendResult(success=False, error=str(exc))
         except Exception as exc:
-            logger.error("[%s] Failed to prepare outbound media %s: %s", self.name, media_source, exc)
+            logger.error("[%s] Failed to prepare outbound media %s: %s", self.name, media_source, exc, exc_info=True)
             return SendResult(success=False, error=str(exc))
 
         if prepared["rejected"]:
@@ -1293,7 +1293,7 @@ class WeComAdapter(BasePlatformAdapter):
         except asyncio.TimeoutError:
             return SendResult(success=False, error="Timeout sending media to WeCom")
         except Exception as exc:
-            logger.error("[%s] Failed to send media %s: %s", self.name, media_source, exc)
+            logger.error("[%s] Failed to send media %s: %s", self.name, media_source, exc, exc_info=True)
             return SendResult(success=False, error=str(exc))
 
         caption_result = None
@@ -1357,7 +1357,7 @@ class WeComAdapter(BasePlatformAdapter):
         except asyncio.TimeoutError:
             return SendResult(success=False, error="Timeout sending message to WeCom")
         except Exception as exc:
-            logger.error("[%s] Send failed: %s", self.name, exc)
+            logger.error("[%s] Send failed: %s", self.name, exc, exc_info=True)
             return SendResult(success=False, error=str(exc))
 
         error = self._response_error(response)
