@@ -2030,22 +2030,28 @@ async def send_weixin_direct(
 
     live_adapter = _LIVE_ADAPTERS.get(resolved_token)
     send_session = getattr(live_adapter, '_send_session', None)
-    if live_adapter is not None and send_session is not None and not send_session.closed:
+    has_media = bool(media_files)
+
+    # Reuse the live adapter only for text-only sends. Its _send_session
+    # was created inside the long-poll reader task; using it for file
+    # uploads from a different task (e.g. the tool-call task that runs
+    # send_message) trips aiohttp's "Timeout context manager should be
+    # used inside a task" check in the upload code path (the 120-second
+    # upload timeout is the trigger).  Text sends go through a much
+    # shorter request timeout and have not reproduced the failure.
+    # See #17347 for the full reproduction and logs.
+    if (
+        live_adapter is not None
+        and send_session is not None
+        and not send_session.closed
+        and not has_media
+    ):
         last_result: Optional[SendResult] = None
         cleaned = live_adapter.format_message(message)
         if cleaned:
             last_result = await live_adapter.send(chat_id, cleaned)
             if not last_result.success:
                 return {"error": f"Weixin send failed: {last_result.error}"}
-
-        for media_path, _is_voice in media_files or []:
-            ext = Path(media_path).suffix.lower()
-            if ext in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}:
-                last_result = await live_adapter.send_image_file(chat_id, media_path)
-            else:
-                last_result = await live_adapter.send_document(chat_id, media_path)
-            if not last_result.success:
-                return {"error": f"Weixin media send failed: {last_result.error}"}
 
         return {
             "success": True,
@@ -2055,6 +2061,10 @@ async def send_weixin_direct(
             "context_token_used": bool(context_token),
         }
 
+    # Fresh-session path: own task, own aiohttp session.  Covers media
+    # sends unconditionally (so the cross-task timeout bug in #17347
+    # cannot fire) and the adapter-unavailable case (cron delivery before
+    # the gateway is fully up, stand-alone tool invocations, etc.)
     async with aiohttp.ClientSession(trust_env=True, connector=_make_ssl_connector()) as session:
         adapter = WeixinAdapter(
             PlatformConfig(
