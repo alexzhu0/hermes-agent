@@ -324,7 +324,7 @@ def _codex_cloudflare_headers(access_token: str) -> Dict[str, str]:
     return headers
 
 
-def _to_openai_base_url(base_url: str) -> str:
+def _to_openai_base_url(base_url: str, *, provider: str = "") -> str:
     """Normalize an Anthropic-style base URL to OpenAI-compatible format.
 
     Some providers (MiniMax, MiniMax-CN) expose an ``/anthropic`` endpoint for
@@ -332,8 +332,20 @@ def _to_openai_base_url(base_url: str) -> str:
     completions.  The auxiliary client uses the OpenAI SDK, so it must hit the
     ``/v1`` surface.  Passing the raw ``inference_base_url`` causes requests to
     land on ``/anthropic/chat/completions`` — a 404.
+
+    However, a subset of these providers (see ``_ANTHROPIC_COMPAT_PROVIDERS``)
+    also do not support auxiliary tasks — title generation, compression,
+    context summarization — on their ``/v1`` surface; hitting ``/v1`` returns
+    404 for those endpoints.  When the caller knows the provider name, pass
+    it so this helper can preserve ``/anthropic`` and let
+    ``_maybe_wrap_anthropic`` route through the Anthropic Messages API
+    instead.  See #17387.
     """
     url = str(base_url or "").strip().rstrip("/")
+    if provider and provider in _ANTHROPIC_COMPAT_PROVIDERS:
+        # Preserve /anthropic so _maybe_wrap_anthropic picks up the
+        # Anthropic transport for auxiliary tasks.
+        return url
     if url.endswith("/anthropic"):
         rewritten = url[: -len("/anthropic")] + "/v1"
         logger.debug("Auxiliary client: rewrote base URL %s → %s", url, rewritten)
@@ -1070,7 +1082,8 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
                 continue
 
             base_url = _to_openai_base_url(
-                _pool_runtime_base_url(entry, pconfig.inference_base_url) or pconfig.inference_base_url
+                _pool_runtime_base_url(entry, pconfig.inference_base_url) or pconfig.inference_base_url,
+                provider=provider_id,
             )
             model = _API_KEY_PROVIDER_AUX_MODELS.get(provider_id)
             if model is None:
@@ -1098,7 +1111,8 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
             continue
 
         base_url = _to_openai_base_url(
-            str(creds.get("base_url", "")).strip().rstrip("/") or pconfig.inference_base_url
+            str(creds.get("base_url", "")).strip().rstrip("/") or pconfig.inference_base_url,
+            provider=provider_id,
         )
         model = _API_KEY_PROVIDER_AUX_MODELS.get(provider_id)
         if model is None:
@@ -2064,7 +2078,7 @@ def resolve_provider_client(
     # ── Custom endpoint (OPENAI_BASE_URL + OPENAI_API_KEY) ───────────
     if provider == "custom":
         if explicit_base_url:
-            custom_base = _to_openai_base_url(explicit_base_url).strip()
+            custom_base = _to_openai_base_url(explicit_base_url, provider=provider).strip()
             custom_key = (
                 (explicit_api_key or "").strip()
                 or os.getenv("OPENAI_API_KEY", "").strip()
@@ -2140,7 +2154,7 @@ def resolve_provider_client(
                 if entry_api_mode == "anthropic_messages":
                     openai_base = custom_base
                 else:
-                    openai_base = _to_openai_base_url(custom_base)
+                    openai_base = _to_openai_base_url(custom_base, provider=provider)
                 _clean_base2, _dq2 = _extract_url_query_params(openai_base)
                 _extra2 = {"default_query": _dq2} if _dq2 else {}
                 logger.debug(
@@ -2162,7 +2176,7 @@ def resolve_provider_client(
                         )
                         # Fallback went OpenAI-wire after all — redo the query
                         # extraction against the rewritten /v1 URL.
-                        _fallback_base = _to_openai_base_url(custom_base)
+                        _fallback_base = _to_openai_base_url(custom_base, provider=provider)
                         _fb_clean, _fb_dq = _extract_url_query_params(_fallback_base)
                         _fb_extra = {"default_query": _fb_dq} if _fb_dq else {}
                         client = OpenAI(api_key=custom_key, base_url=_fb_clean, **_fb_extra)
@@ -2231,7 +2245,8 @@ def resolve_provider_client(
             return None, None
 
         base_url = _to_openai_base_url(
-            str(creds.get("base_url", "")).strip().rstrip("/") or pconfig.inference_base_url
+            str(creds.get("base_url", "")).strip().rstrip("/") or pconfig.inference_base_url,
+            provider=provider,
         )
 
         default_model = _API_KEY_PROVIDER_AUX_MODELS.get(provider, "")

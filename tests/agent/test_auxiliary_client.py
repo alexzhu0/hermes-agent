@@ -1738,3 +1738,78 @@ class TestVisionAutoSkipsKimiCoding:
             "kimi-coding",
             "kimi-coding-cn",
         })
+
+
+class TestToOpenaiBaseUrl:
+    """Regression tests for _to_openai_base_url provider-gated rewrite (#17387)."""
+
+    def test_rewrites_anthropic_suffix_by_default(self):
+        from agent.auxiliary_client import _to_openai_base_url
+        assert (
+            _to_openai_base_url("https://api.example.com/anthropic")
+            == "https://api.example.com/v1"
+        )
+
+    def test_preserves_non_anthropic_url(self):
+        from agent.auxiliary_client import _to_openai_base_url
+        assert (
+            _to_openai_base_url("https://api.example.com/v1")
+            == "https://api.example.com/v1"
+        )
+
+    def test_preserves_anthropic_for_minimax_cn(self):
+        """MiniMax-CN /v1 does not support aux tasks; keep /anthropic so
+        _maybe_wrap_anthropic can route through the Anthropic Messages API."""
+        from agent.auxiliary_client import _to_openai_base_url
+        assert (
+            _to_openai_base_url(
+                "https://api.minimaxi.com/anthropic",
+                provider="minimax-cn",
+            )
+            == "https://api.minimaxi.com/anthropic"
+        )
+
+    def test_preserves_anthropic_for_minimax(self):
+        from agent.auxiliary_client import _to_openai_base_url
+        assert (
+            _to_openai_base_url(
+                "https://api.minimax.chat/anthropic",
+                provider="minimax",
+            )
+            == "https://api.minimax.chat/anthropic"
+        )
+
+    def test_unrelated_provider_still_gets_rewrite(self):
+        """Providers not in _ANTHROPIC_COMPAT_PROVIDERS keep the old
+        /anthropic → /v1 rewrite so existing aux-client behavior is
+        unchanged for everyone else."""
+        from agent.auxiliary_client import _to_openai_base_url
+        assert (
+            _to_openai_base_url(
+                "https://api.example.com/anthropic",
+                provider="openai",
+            )
+            == "https://api.example.com/v1"
+        )
+
+    def test_empty_provider_falls_back_to_rewrite(self):
+        """Empty provider string means 'caller didn't specify' and must
+        preserve pre-#17387 behavior."""
+        from agent.auxiliary_client import _to_openai_base_url
+        assert (
+            _to_openai_base_url(
+                "https://api.minimaxi.com/anthropic",
+                provider="",
+            )
+            == "https://api.minimaxi.com/v1"
+        )
+
+    def test_trailing_slash_stripped_regardless_of_provider(self):
+        from agent.auxiliary_client import _to_openai_base_url
+        assert (
+            _to_openai_base_url(
+                "https://api.minimaxi.com/anthropic/",
+                provider="minimax-cn",
+            )
+            == "https://api.minimaxi.com/anthropic"
+        )
