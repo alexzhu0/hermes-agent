@@ -20,6 +20,11 @@ from agent.skill_preprocessing import (
 logger = logging.getLogger(__name__)
 
 _skill_commands: Dict[str, Dict[str, Any]] = {}
+# Set once scan_skill_commands() has reported a failure, cleared on next
+# success. Prevents recurring get_skill_commands() callers from flooding
+# the log with repeated tracebacks when the skills dir is persistently
+# unavailable (bad perms, deleted externally, etc.).
+_scan_error_logged: bool = False
 # Patterns for sanitizing skill names into clean hyphen-separated slugs.
 _SKILL_INVALID_CHARS = re.compile(r"[^a-z0-9-]")
 _SKILL_MULTI_HYPHEN = re.compile(r"-{2,}")
@@ -218,8 +223,8 @@ def scan_skill_commands() -> Dict[str, Dict[str, Any]]:
     Returns:
         Dict mapping "/skill-name" to {name, description, skill_md_path, skill_dir}.
     """
-    global _skill_commands
-    _skill_commands = {}
+    global _skill_commands, _scan_error_logged
+    new_commands: Dict[str, Dict[str, Any]] = {}
     try:
         from tools.skills_tool import SKILLS_DIR, _parse_frontmatter, skill_matches_platform, _get_disabled_skill_names
         from agent.skill_utils import get_external_skills_dirs, iter_skill_index_files
@@ -264,7 +269,7 @@ def scan_skill_commands() -> Dict[str, Dict[str, Any]]:
                     cmd_name = _SKILL_MULTI_HYPHEN.sub('-', cmd_name).strip('-')
                     if not cmd_name:
                         continue
-                    _skill_commands[f"/{cmd_name}"] = {
+                    new_commands[f"/{cmd_name}"] = {
                         "name": name,
                         "description": description or f"Invoke the {name} skill",
                         "skill_md_path": str(skill_md),
@@ -273,7 +278,23 @@ def scan_skill_commands() -> Dict[str, Dict[str, Any]]:
                 except Exception:
                     continue
     except Exception:
-        pass
+        # Build failed outright (import failure, unreadable skills dir, etc.).
+        # Keep the previous mapping rather than blanking all slash commands,
+        # and surface the error so it's diagnosable. Guard against a hot-loop
+        # of full tracebacks: get_skill_commands() re-scans whenever the
+        # cache is empty, so if the failure is persistent (bad perms on
+        # skills dir) every caller would pay the log cost otherwise.
+        if not _scan_error_logged:
+            logger.warning(
+                "scan_skill_commands failed; keeping previous mapping (%d entries)",
+                len(_skill_commands),
+                exc_info=True,
+            )
+            _scan_error_logged = True
+        return _skill_commands
+    _skill_commands = new_commands
+    # Reset the error-logged flag on success so future failures are audible.
+    _scan_error_logged = False
     return _skill_commands
 
 
