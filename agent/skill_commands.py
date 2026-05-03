@@ -6,6 +6,7 @@ can invoke skills via /skill-name commands.
 
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -20,6 +21,7 @@ from agent.skill_preprocessing import (
 logger = logging.getLogger(__name__)
 
 _skill_commands: Dict[str, Dict[str, Any]] = {}
+_skill_commands_platform: Optional[str] = None
 # Set once scan_skill_commands() has reported a failure, cleared on next
 # success. Prevents recurring get_skill_commands() callers from flooding
 # the log with repeated tracebacks when the skills dir is persistently
@@ -28,6 +30,30 @@ _scan_error_logged: bool = False
 # Patterns for sanitizing skill names into clean hyphen-separated slugs.
 _SKILL_INVALID_CHARS = re.compile(r"[^a-z0-9-]")
 _SKILL_MULTI_HYPHEN = re.compile(r"-{2,}")
+
+
+def _resolve_skill_commands_platform() -> Optional[str]:
+    """Return the current platform scope used for disabled-skill filtering.
+
+    Used to detect when the active platform has shifted so
+    :func:`get_skill_commands` can drop a stale cache that was populated
+    for a different platform's ``skills.platform_disabled`` view (#14536).
+
+    Resolves from (in order) ``HERMES_PLATFORM`` env var and
+    ``HERMES_SESSION_PLATFORM`` from the gateway session context. Returns
+    ``None`` when no platform scope is active (e.g. classic CLI, RL
+    rollouts, standalone scripts).
+    """
+    try:
+        from gateway.session_context import get_session_env
+
+        resolved_platform = (
+            os.getenv("HERMES_PLATFORM")
+            or get_session_env("HERMES_SESSION_PLATFORM")
+        )
+    except Exception:
+        resolved_platform = os.getenv("HERMES_PLATFORM")
+    return resolved_platform or None
 
 def _load_skill_payload(skill_identifier: str, task_id: str | None = None) -> tuple[dict[str, Any], Path | None, str] | None:
     """Load a skill by name/path and return (loaded_payload, skill_dir, display_name)."""
@@ -223,7 +249,8 @@ def scan_skill_commands() -> Dict[str, Dict[str, Any]]:
     Returns:
         Dict mapping "/skill-name" to {name, description, skill_md_path, skill_dir}.
     """
-    global _skill_commands, _scan_error_logged
+    global _skill_commands, _skill_commands_platform, _scan_error_logged
+    _skill_commands_platform = _resolve_skill_commands_platform()
     new_commands: Dict[str, Dict[str, Any]] = {}
     try:
         from tools.skills_tool import SKILLS_DIR, _parse_frontmatter, skill_matches_platform, _get_disabled_skill_names
@@ -299,8 +326,16 @@ def scan_skill_commands() -> Dict[str, Dict[str, Any]]:
 
 
 def get_skill_commands() -> Dict[str, Dict[str, Any]]:
-    """Return the current skill commands mapping (scan first if empty)."""
-    if not _skill_commands:
+    """Return the current skill commands mapping (scan first if empty).
+
+    Rescans when the active platform scope changes (e.g. a gateway
+    process serving Telegram and Discord concurrently) so each platform
+    sees its own ``skills.platform_disabled`` view (#14536).
+    """
+    if (
+        not _skill_commands
+        or _skill_commands_platform != _resolve_skill_commands_platform()
+    ):
         scan_skill_commands()
     return _skill_commands
 
