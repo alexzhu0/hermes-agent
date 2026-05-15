@@ -36,6 +36,28 @@ class TestProviderSelectionGate:
     configure ``{"enabled": True, "provider": ...}`` for explicit tests.
     """
 
+    def test_import_after_config_env_patch_uses_restored_dotenv_loader(self):
+        """Importing STT while hermes_cli.config.get_env_value is patched must
+        not freeze that temporary helper into this module forever.
+        """
+        import importlib
+        import hermes_cli.config as config_mod
+        from tools import transcription_tools as tt
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(config_mod, "get_env_value", lambda name, default=None: "")
+            tt = importlib.reload(tt)
+
+        try:
+            with patch.object(tt, "_HAS_FASTER_WHISPER", False), \
+                 patch.object(tt, "_HAS_OPENAI", True), \
+                 patch.object(tt, "_has_local_command", return_value=False), \
+                 patch("hermes_cli.config.load_env",
+                       return_value={"GROQ_API_KEY": "dotenv-secret"}):
+                assert tt._get_provider({"enabled": True, "provider": "groq"}) == "groq"
+        finally:
+            importlib.reload(tt)
+
     def test_explicit_groq_sees_dotenv(self):
         from tools import transcription_tools as tt
 
@@ -47,6 +69,12 @@ class TestProviderSelectionGate:
             assert tt._get_provider({"enabled": True, "provider": "groq"}) == "groq"
 
     def test_explicit_mistral_sees_dotenv(self):
+        """Mistral STT is intentionally disabled (PyPI quarantine 2026-05-12).
+
+        Even with the dotenv key visible, explicit `provider: mistral` must
+        return "none" with a warning. Restore the previous behavior once
+        `mistralai` is un-quarantined on PyPI.
+        """
         from tools import transcription_tools as tt
 
         with patch.object(tt, "_HAS_FASTER_WHISPER", False), \
@@ -54,7 +82,7 @@ class TestProviderSelectionGate:
              patch.object(tt, "_has_local_command", return_value=False), \
              patch("hermes_cli.config.load_env",
                    return_value={"MISTRAL_API_KEY": "dotenv-secret"}):
-            assert tt._get_provider({"enabled": True, "provider": "mistral"}) == "mistral"
+            assert tt._get_provider({"enabled": True, "provider": "mistral"}) == "none"
 
     def test_explicit_xai_sees_dotenv(self):
         from tools import transcription_tools as tt

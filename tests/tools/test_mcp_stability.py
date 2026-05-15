@@ -108,8 +108,16 @@ class TestStdioPidTracking:
         with _lock:
             _orphan_stdio_pids.add(fake_pid)
 
-        # Should not raise (ProcessLookupError is caught)
-        _kill_orphaned_mcp_children()
+        # Mock os.kill so the conftest live-system guard doesn't block real
+        # signal delivery; emulate ProcessLookupError ("no such process") for
+        # this dead PID.
+        def _emulate_dead(pid, sig):
+            raise ProcessLookupError(f"emulated dead pid {pid}")
+
+        with patch("tools.mcp_tool.os.kill", side_effect=_emulate_dead), \
+             patch("time.sleep"):
+            # Should not raise (ProcessLookupError is caught)
+            _kill_orphaned_mcp_children()
 
         with _lock:
             assert fake_pid not in _orphan_stdio_pids
@@ -130,15 +138,18 @@ class TestStdioPidTracking:
         fake_sigkill = 9
         monkeypatch.setattr(signal, "SIGKILL", fake_sigkill, raising=False)
 
+        # Post-#21561 the alive check routes through
+        # ``gateway.status._pid_exists`` (so it's safe on Windows — see
+        # bpo-14484). Return True so the SIGKILL escalation fires.
         with patch("tools.mcp_tool.os.kill") as mock_kill, \
+             patch("gateway.status._pid_exists", return_value=True), \
              patch("time.sleep") as mock_sleep:
             _kill_orphaned_mcp_children()
 
-        # SIGTERM, then alive-check (signal 0), then SIGKILL
+        # SIGTERM then SIGKILL; the alive check no longer touches os.kill.
         mock_kill.assert_any_call(fake_pid, signal.SIGTERM)
-        mock_kill.assert_any_call(fake_pid, 0)  # alive check
         mock_kill.assert_any_call(fake_pid, fake_sigkill)
-        assert mock_kill.call_count == 3
+        assert mock_kill.call_count == 2
         mock_sleep.assert_called_once_with(2)
 
         with _lock:
